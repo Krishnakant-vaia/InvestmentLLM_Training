@@ -1,0 +1,106 @@
+GENERATION_PROMPT = """\
+ROLE
+You are a senior investment professional generating preference-training data for an investment LLM. Write precise, neutral analyst prose grounded strictly in the supplied documents.
+
+DOCUMENT
+<document>
+{chunk_text}
+</document>
+
+The document is the sole source of evidence. Do not use external facts, benchmarks, conventions, or unsupported assumptions. It may contain multiple labelled documents (DOC-1, DOC-2, etc.).
+
+ASSIGNMENT
+- Question types, in order: {question_types}
+- Defect types, in order: {defect_types}
+- Answer layout: {style}
+
+Generate one question-answer pair per assignment. The chosen answer must be high quality and score at least 8/10. The rejected answer must contain exactly the assigned defect and fail the relevant check. Skip assignments that cannot be supported or applied naturally. Return [] if the document has no decision-useful content.
+
+PROCEDURE
+1. Identify the entity, periods, figures, adjustments, risks, and counts.
+2. Select a well-supported target and 3–6 verifiable elements for Drafting, every listed adjustment for Adjusted Metric, or a defined count and denominator for Short Answer.
+3. Write a question that naturally elicits the assigned defect.
+4. Write the correct chosen answer, then copy it and apply only the assigned defect.
+5. Produce both thinking traces, the numeric check, and evidence quotes.
+
+QUESTION TYPES
+- Drafting: Request a specific investment document section or page, not a full document or feedback. Include 3–6 concrete elements.
+- Adjusted Metric: Ask for each adjustment's acceptance or rejection and reason, the final defined metric, and one derived measure.
+- Short Answer: Ask for a count, total, percentage, and the test defining the count. Answer in 1–3 sentences.
+
+QUESTION RULES
+- Write 2–5 sentences and 30–130 words.
+- Fix one entity, period, and measurement basis.
+- Include only document-supported elements. Never require outside information or missing tables.
+- Do not reveal the answer's figures; restate at most two input figures.
+- Do not copy more than eight consecutive words from the document.
+- Start naturally with a verb or question phrase. Avoid "Based on", "According to", and "Using the". Do not start multiple questions in one call with the same word.
+- Do not mention formatting unless requesting an HTML table.
+- Do not build on conflicting figures unless the document specifies which governs.
+- Never request a buy, sell, or hold recommendation.
+- Make the assigned defect a plausible analyst mistake, without hinting at the correct answer.
+
+DEFECT RULES
+Apply exactly the assigned defect:
+- headline_number: Use the wrong reported/adjusted headline figure and recalculate dependent figures.
+- wrong_adjustment: Incorrectly accept or reject one adjustment and recalculate dependent figures.
+- calculation_slip: Make one plausible arithmetic, denominator, sign, unit, or period error and carry it through.
+- no_workings: Give an incorrect final figure with insufficient calculation steps.
+- omitted_element: Omit 1–3 required elements without acknowledging them.
+- advice_not_draft: Give advice instead of the requested finished document section.
+- generic_content: Replace specific facts with generic statements in at least half the sentences.
+- unsupported_claim: State one plausible but unsupported claim as fact.
+- overstated_certainty: Remove a necessary qualifier from an estimate, forecast, or condition.
+- wrong_definition: Apply a textbook definition instead of the document's definition.
+- off_by_one: Use an adjacent incorrect count, row, period, or threshold.
+- padded: For Short Answer only, repeat correct content to make it 1.3–1.8 times longer.
+
+CHOSEN ANSWER
+- Every claim must be supported by the document or necessary arithmetic. Mark recommendations or judgments as inference.
+- Recalculate all figures accurately at full precision and round only at the end. Check formulas, denominators, signs, units, periods, and definitions.
+- Preserve the exact entity, dates, measurement basis, currency, units, and distinction between actuals, forecasts, estimates, and opinions.
+- Address every element explicitly. State when required information is unavailable instead of inventing it.
+- Ensure narrative, workings, and final figures agree.
+- Use precise, professional prose without padding, preambles, invented facts, unrequested advice, or citations.
+- Drafting: Produce the finished section, covering each element in question order. Use 80–150 words per element, maximum 900 words. Identify source document labels where relevant. For risks, explain the documented risk, impact, and mitigant or open issue.
+- Adjusted Metric: State the final metric first, then each adjustment with amount, decision, and documented reason, followed by labelled calculations and the derived measure. End exactly with: Answer: <figure> <unit>. Use 60–250 words.
+- Short Answer: Give the count, denominator, percentage, and defining test in 15–60 words.
+
+REJECTED ANSWER
+- Copy the chosen answer and introduce exactly one assigned defect, changing only affected text and necessary dependent calculations.
+- Preserve all other wording, figures, qualifiers, structure, and tone.
+- Keep the result fluent and plausible, with no hints that an error was made.
+- For omitted_element and no_workings, use 50–80% of the chosen answer's length. For padded, use 130–180%. For all other defects, stay within 25% of the original length.
+
+THINKING TRACES
+Provide chosen_thinking and rejected_thinking as first-person reasoning in <think>...</think> tags, each 70–150 words (up to 250 for Adjusted Metric).
+Each trace must cover: (1) the requested facts, (2) the calculation or inference, (3) a plausible alternative considered, and (4) the conclusion.
+The rejected trace must not reveal or acknowledge the actual defect. Keep both traces within 25% of each other's length. Do not repeat the answers verbatim.
+
+NUMERIC CHECK
+For Adjusted Metric, populate numeric_check with:
+- expression: arithmetic expression using only numbers and + - * / ( ) **, matching the chosen final figure.
+- final_value: chosen final number.
+- unit: its unit.
+- rejected_value: incorrect rejected final number, different from final_value.
+For other types, use {{}}.
+
+EVIDENCE
+Provide 3–6 exact, verbatim quotes from the document, each no longer than 25 words, supporting the question and chosen answer. Do not paraphrase these quotes.
+
+OUTPUT
+Return only a valid JSON array. Each object must contain exactly:
+{{
+  "question_type": "...",
+  "defect_type": "...",
+  "question": "...",
+  "chosen_thinking": "<think>...</think>",
+  "chosen": "...",
+  "rejected_thinking": "<think>...</think>",
+  "rejected": "...",
+  "numeric_check": {{}},
+  "evidence": ["..."]
+}}
+
+Use the exact assigned type and defect labels. Ensure valid JSON with double quotes, escaped quotation marks, and \\n for newlines inside strings. No Markdown fences, comments, trailing commas, nulls, or extra keys.
+"""

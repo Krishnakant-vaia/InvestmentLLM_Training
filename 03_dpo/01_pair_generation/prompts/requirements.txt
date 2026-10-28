@@ -1,0 +1,6 @@
+vllm            # serves gpt-oss-120b on the sandbox (unpinned, like SFT_Script/requirements/evaluation.txt)
+requests
+boto3
+numpy
+# Local machine only (the Daytona launcher): pip install daytona
+# Tests only: pip install pytest

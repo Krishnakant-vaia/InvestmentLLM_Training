@@ -1,0 +1,4 @@
+pytest
+pyyaml
+numpy
+python-dotenv

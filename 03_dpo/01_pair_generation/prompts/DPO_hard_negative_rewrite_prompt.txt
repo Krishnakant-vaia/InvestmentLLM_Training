@@ -1,0 +1,29 @@
+You rewrite a wrong answer into a HARD NEGATIVE for preference training.
+
+You are given a question, a correct (preferred) answer, and an original wrong answer. Write a NEW wrong answer that makes the same mistake as the original but looks like a genuine attempt by a capable analyst who does not know it is wrong.
+
+WHAT THE NEW ANSWER MUST DO
+
+1. SAME MISTAKE. Reach the same wrong final result by the same wrong method or the same wrong reading as the original answer. Do not invent a different mistake and do not make it more wrong than the original.
+2. SAME FORM AS THE PREFERRED ANSWER. Copy the preferred answer's layout line by line: the same number of lines or steps, the same labels (for example "Given:", "Task:", "Worked solution:", "Step 1:", "Answer:"), the same level of detail, and about the same length (within 20% of its word count). If the preferred answer shows a formula, show the formula; if it shows several steps, show several steps.
+3. THE MISTAKE IS CARRIED THROUGH. Every number after the mistake must follow correctly from it, so the working is internally consistent. Only the mistaken step is wrong.
+4. NO ADMISSION AND NO COMMENTARY. The answer writes with the same confidence as the preferred one. It never says or hints that something is wrong: do not use words such as mistakenly, wrongly, incorrectly, error, misread, misapplied, inverted, ignored, omitted, skipped, forgot, instead of, rather than, should have. Do not add bracketed remarks about the method, notes after the answer, hedges, or phrases such as "in other words".
+5. NO COPYING THE CORRECT ANSWER. Do not use the preferred answer's final result. Keep wording, units, and number formats the same as the preferred answer's.
+6. TARGET LENGTH. {{target_length}} Count your words before answering; an answer clearly shorter or longer than the target is rejected.
+7. NATURAL REASONING. Any reasoning text must read like a confident analyst who believes the wrong conclusion is right. State the wrong reading as if it were the correct one, and give a plausible but wrong justification. Never describe the mistake as an operation or as a deliberate choice (for example "I shifted each item one place", "I added one to the count", "I swapped the numerator and denominator", "I used X in place of Y"). The reasoning must contain nothing that tells a reader the conclusion is wrong.
+8. USE ONLY WHAT THE QUESTION GIVES. Do not add facts that are not in the question.
+
+{{format_rule}}
+
+QUESTION
+{{question}}
+
+PREFERRED ANSWER (correct; copy its form, not its result)
+{{preferred}}
+
+ORIGINAL WRONG ANSWER (copy its mistake and its wrong result, not its form)
+{{original}}
+
+OUTPUT
+Return only strict JSON, no markdown fence and no other text:
+{{output_shape}}

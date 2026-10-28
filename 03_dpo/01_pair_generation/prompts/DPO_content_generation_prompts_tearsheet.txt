@@ -1,0 +1,98 @@
+GENERATION_PROMPT = """\
+ROLE
+You are a senior analyst at a fund holding stakes in growth companies, producing preference-training data for an LLM that drafts tear sheets and reads their figures correctly.
+
+DOCUMENT
+<document>
+{chunk_text}
+</document>
+
+One company's tear sheet in markdown, the sole evidence (no outside facts or benchmarks). Every sheet has Snapshot (status, board seat, reserves for follow-ons, latest valuation, total invested, total ownership, total cash raised), Description, Rounds (date, shares, cash raised, valuation, our investment, our ownership, price), Reported financials (quarter and LTM columns with growth), Team, Board, Syndicate and the quarterly Update. Read which rows THIS sheet has and never use a metric it lacks:
+- Startup sheets: Operating metrics (ARR, prior ARR, ACV, gross margin, new customers, runway), a Cash burn (LTM) row, one sector KPI.
+- Sector sheets: no ARR, ACV, new customers or burn row; a margin row (EBITDA margin, or pre-provision margin for banking) and three KPI rows. Gross margin and any runway appear only in the Update; a cash-generative company has no runway.
+
+SECTOR KPIs AND THE FIGURES THEY SUPPORT
+Banking and NBFC: AUM, gross NPA ratio, net interest margin; AUM growth. Technology and SaaS: Rule of 40, net revenue retention, customers above $100K ARR. Pharma: R&D % of revenue, cumulative approvals, regulated-market share; R&D spend as a % of revenue times revenue. Retail and e-commerce: GMV, like-for-like growth, repeat share; revenue as a share of GMV. Industrials: order book, book-to-LTM-revenue, utilisation. Energy: installed MW, plant load factor, share under long-term PPAs; contracted MW. Logistics: shipments, on-time delivery, revenue per shipment. Automotive: units, EV share, dealer network; EV units. FMCG: volume growth, outlets, A&P % of revenue; volume growth against revenue growth. Real estate: pre-sales, collections, unsold area; collections against pre-sales. Startups: ARR growth, ARR against revenue, burn, runway.
+
+ASSIGNMENT
+- Question types, in order: {question_types}
+- Defect types, in order: {defect_types}
+- Answer layout: {style}
+
+One pair per assignment, exact labels. Skip an assignment the sheet or the defect cannot support; return [] if the sheet has no usable content. The preferred answer is correct and complete; the not-preferred answer is a copy with exactly one defect. A strict judge scores each alone: preferred 8 or more, not-preferred failing only the check its defect breaks.
+
+QUESTION TYPES
+- Drafting: one named part of this company's sheet: (a) snapshot and overview, (b) financial and KPI commentary, (c) financing history and our ownership, (d) team and board, (e) quarterly update with risks and watch points, (f) the full one-page sheet only if short. Name 3 to 6 tickable elements, using this sheet's own KPIs.
+  Good (banking): "Draft the financial and KPI commentary on [Company] for the partners' meeting, covering (a) LTM revenue and pre-provision profit against the prior LTM, (b) AUM growth, (c) asset quality and margin, and (d) how the Update's margin differs from the table's."
+- Adjusted Metric: a figure that depends on a basis the sheet supports (see the traps). Name every input, ask which basis applies and why, then the final figure, then one derived measure.
+  Good (SaaS): "Work out [Company]'s Rule of 40 on the sheet's own definition, say which figures it uses, and state its distance from 40."
+- Short Answer: a count or share with its defining test (rounds before a date, independent board seats, leaders with a named prior employer, one country's share of headcount). One to three sentences.
+
+QUESTION RULES
+1. One company, one period, one basis.
+2. Never state the answer's figures; restate at most two input figures. Copy no run of more than 8 words from the document.
+3. Start with a verb or question phrase, never "Based on", "According to" or "Using the"; no two questions in a call start alike; no "concise", no layout words.
+4. No buy, sell or hold view, valuation opinion or peer comparison; outlook only as marked inference.
+
+TRAPS THE SHEETS CONTAIN (use them for Adjusted Metric and for the numeric parts of Drafting)
+- Quarter against LTM: the Update quotes a quarterly margin, the table an LTM margin, and they differ.
+- Label-defined metrics: Rule of 40, book-to-LTM-revenue, "% of revenue", "(000)" units. Apply the label, not a textbook version.
+- Our fund against the company: Ownership, Our investment and Total invested are ours, summed over rounds; Cash raised, Shares and Valuation are the company's round. Use valuations as labelled, never as pre- or post-money.
+- Stated against recomputed: total ownership, total invested, latest valuation and runway are stated. Use them; if you recompute, say whether it agrees.
+- A percent of revenue or volume turned into an amount needs the matching period.
+- A loss that grows is a negative change. A dash is "not provided". Fiscal labels can differ from calendar dates.
+
+PREFERRED ANSWER
+- Every claim is in the sheet or follows by arithmetic. Fill no gap; give no cause for a movement unless the Update does.
+- Recompute at full precision, round at the end (percentages one decimal, multiples two); keep the sheet's currency and period labels. Actual apart from plan, stated apart from computed, no more certainty than the sheet.
+- Every element in the question's order, with figure and period. A draft is the page itself, in a partner's reading order, not an outline, partial draft or advice.
+- Each risk names itself, ties to a specific row or Update fact of this sector (asset quality, utilisation, order book, runway), states the effect, and gives a mitigant or open item. 
+- No preamble, restated question, disclaimer, placeholder, padding or invented names.
+Structure: Drafting follows the layout line, one block per element, claim first then figures with unit and period, 80 to 150 words per element, 900 at most, no closing summary. Adjusted Metric: line 1 the final figure; one line per input (value, period, why that basis); the arithmetic as labeled steps and the derived measure; last line exactly "Answer: <figure> <unit>"; 60 to 250 words. Short Answer: count out of total, percentage and defining test, 15 to 60 words.
+
+DEFECTS (shape the question so the defect is a natural mistake, without hinting at the right route; then the not-preferred answer)
+The not-preferred answer copies the preferred one; it changes only the affected claim and what depends on it. Everything else stays word for word, same tone, no hint of error.
+- omitted_element: Question: name 4 or more elements. Not-preferred: delete the blocks of 2 or 3 named elements (1 if only 3 or 4 are named), unmentioned. Length 0.5 to 0.8 times.
+- advice_not_draft: Question: set a deadline ("the partner needs the page this afternoon"). Not-preferred: replace the finished text with advice on writing it, same facts.
+- generic_content: Question: ask for elements resting on this company's own rows. Not-preferred: in half or more of the sentences, swap names, figures and dates for statements that fit any company.
+- unsupported_claim: Question: include an element the sheet answers only partly. Not-preferred: replace one supported sentence with a plausible claim the sheet lacks.
+- overstated_certainty: Question: include an expectation from the Update. Not-preferred: delete the qualifier on one expectation.
+- headline_number: Question: ask for a figure shown on two bases, not saying which. Not-preferred: give the other basis (quarter for LTM, Update margin for table margin, revenue for ARR), carried through.
+- wrong_adjustment: Question: require a basis step a hasty analyst might skip. Not-preferred: skip a needed basis step or apply an unsupported one (sum only some rounds, ignore reserves, treat quarter as LTM, skip the percent-to-amount step), carried through.
+- wrong_definition: Question: use a term by the sheet's meaning. Not-preferred: the textbook reading of a sheet term, carried through.
+- calculation_slip: Question: require a period, denominator, sign or unit step. Not-preferred: one wrong step (period, denominator, sign, unit), workings still shown.
+- off_by_one: Question: pick a round, quarter or count next to a neighbour. Not-preferred: the adjacent round, quarter, row or count, carried through.
+- no_workings: Question: require a calculation of 3 or more steps. Not-preferred: a WRONG final figure with the reasoning cut to one or two sentences. Length 0.5 to 0.8 times.
+- padded: Not-preferred: Short Answer only; same content 1.3 to 1.8 times as long by repetition.
+Length stays within 25 percent of the preferred answer except for omitted_element, no_workings and padded.
+
+THINKING
+preferred_thinking and not_preferred_thinking: first-person reasoning inside <think>...</think>, plain paragraphs, no bullets. Write the reasoning out in full rather than summarising it; aim for roughly 200 to 330 words (Adjusted Metric up to 350). Each trace covers, in order:
+1. The ask: what is requested, and each sheet row used, quoted with its label, value and period.
+2. The working: every arithmetic step with its numbers (or, for a draft, how each element is built from which rows), and which column or basis is used and why.
+3. A check: one alternative reading that a hasty analyst would take (other column, other basis, other party), worked through to its value, and why the sheet rules it out. In the not-preferred trace this check is about a different, unrelated point, never its real defect.
+4. The conclusion, in one sentence.
+Both traces are similar in length and depth. The not-preferred trace reasons sincerely to its own answer and never names its defect. Neither repeats the answer text.
+
+NUMERIC CHECK
+For Adjusted Metric: expression (numbers and + - * / ( ) ** only, equal to the preferred final figure), final_value, unit, not_preferred_value (the not-preferred final figure, a different number). Otherwise {{}}.
+
+EVIDENCE
+3 to 6 verbatim quotes of 25 words or fewer, copied character for character from the document: a table row, an Update sentence, a name with its role. A script checks each one. For a table, quote a label and its value as 'Label | value', with the value written exactly as in the sheet (for example $75,530,386, never a rounded $75.5M); no ellipses, no rounding, no joining of cells without a '|'.
+
+OUTPUT
+Return only a valid JSON array. Each object has exactly these keys:
+{{
+  "question_type": "...",
+  "defect_type": "...",
+  "question": "...",
+  "preferred_thinking": "<think>...</think>",
+  "preferred": "...",
+  "not_preferred_thinking": "<think>...</think>",
+  "not_preferred": "...",
+  "numeric_check": {{}},
+  "evidence": ["..."]
+}}
+Use the exact assigned labels. Valid JSON with double quotes, \\n for newlines inside strings, escaped quotation marks, no Markdown fences, comments, trailing commas, nulls or extra keys.
+"""
+ 

@@ -1,0 +1,123 @@
+# Content Generation prompt. Same format as qa_prompt.txt, so generate.load_prompt(path) loads it unchanged.
+# Placeholders filled by generate.py: {chunk_text} = the case file, {question_types}, {defect_types} and {style} = the assignment. One call = one file + 1 to 3 assignments.
+# The standards are those of DPO_pair_judge_prompt.txt (gates G1-G8): the judge scores both answers against them.
+GENERATION_PROMPT = """\
+ROLE: You are a senior investment professional at an Indian private-markets and credit firm, with working experience of IC papers, CIMs, tear sheets, LP and fund reporting, credit analysis and loan documentation. You are writing preference-training data for an investment LLM. Questions read the way a colleague would ask them. Answers are neutral, precise analyst prose.
+
+HOW THE DATA IS USED AND CHECKED
+The chosen answer is the exemplar. The not-preferred answer is a copy of it with one assigned defect. A strict judge scores both independently against the document: the chosen answer must score 8 or more, and the not-preferred answer must fail only the check its defect is meant to break.
+
+<document>
+{chunk_text}
+</document>
+The document is the case file for one entity. It may hold several labelled documents (DOC-1, DOC-2, ...). It is the ONLY evidence: no outside facts, benchmarks, market conventions or textbook figures.
+
+ASSIGNMENT (fixed by the pipeline):
+- Question types, in order: {question_types}
+- Defect for each not-preferred answer, in the same order: {defect_types}
+- Layout for both answers: {style}
+
+For each assigned type write one pair: a question, a CHOSEN answer and a NOT-PREFERRED answer (stored under the key `rejected`). Never substitute another type or defect. Skip a type if the question rules cannot be met, or if its assigned defect cannot be applied naturally to your question. Return [] if the document has no decision-useful content.
+
+PROCEDURE
+1. Inventory the document silently: entity, periods, figures, adjustments with their stated reasons, named risks, counts.
+2. Choose the TARGET: the section, metric or count for which the document gives the most facts. A Drafting target needs at least 3 distinct facts or figures.
+3. Choose the ELEMENTS: 3 to 6 for Drafting, every listed adjustment for Adjusted Metric, the count and its test for Short Answer. Each element is one thing a reviewer can tick off (a figure, a decision with its reason, a named risk with its effect, a comparison) and must point to a sentence or figure in the document. Drop any that does not. If fewer than 3 remain for Drafting, skip the type.
+4. Write the QUESTION, shaped so that the assigned defect is a natural mistake (MAKE THE DEFECT NATURAL).
+5. Write the CHOSEN answer, covering every element in the question.
+6. Write the NOT-PREFERRED answer by copying the chosen answer and applying the defect.
+7. Write the two thinking traces, the numeric check and the evidence quotes.
+
+QUESTION TYPES
+Drafting: one named section or page of a document, written for this entity. IC memo: summary, investment thesis, financial analysis, valuation and returns, risks and mitigants, recommendation. CIM or teaser: business overview, investment highlights, financial summary. Tear sheet: one-page profile with a snapshot table. LP report: performance summary, portfolio review, outlook. Covenant certificate, regulatory return, term sheet: the document itself.
+  Good: "Draft the Financial Analysis section of the IC memo on [Entity] for the investment committee, covering (a) the bridge from reported to underwritten EBITDA with each add-back accepted or rejected on the document's grounds, (b) the resulting margin and (c) how concentrated FY[year] revenue is in the largest customer."
+  Bad: "Write an IC memo on [Entity]." (no section or elements). "Review the financial analysis section." (feedback, not a draft).
+Adjusted Metric: a figure under the document's own definition (adjusted or underwritten EBITDA, net debt, a covenant ratio, a concentration share). Name every adjustment or component the document lists and ask for the decision on each, then the final figure, then one derived measure (margin, leverage or share).
+  Good: "What is [Entity]'s underwritten FY[year] EBITDA on the quality-of-earnings basis? State whether each of the [n] proposed add-backs is accepted and why, then give the margin on FY[year] revenue."
+  Bad: "What is [Entity]'s EBITDA?" (reported or adjusted is not fixed).
+Short Answer: a count, a total and a percentage, with the test that defines the count. The correct answer is one to three sentences.
+  Good: "How many of the management reference calls were positive with no reservation, out of how many calls, and what share is that?"
+
+QUESTION RULES
+1. 2 to 5 sentences, 30 to 130 words.
+2. One entity, one period, one basis (reported or adjusted, gross or net, actual or forecast), stated in the question or fixed by the document.
+3. Drafting: name the section and 3 to 6 tickable elements. Adjusted Metric: name every adjustment and ask for the decision on each. Short Answer: name the count and the test.
+4. Every element is supported by the document. The question needs no outside definition, live data or missing table.
+5. Never state the answer's figures. Restate at most 2 input figures. Copy no run of more than 8 words from the document.
+6. Say nothing about layout (headings, bullets, section order, word count). The one exception is asking for an HTML table where a table is wanted.
+7. Open with a verb or a natural phrase (draft, write, prepare, set out, work out, how many), never with "Based on", "According to" or "Using the". Within one call, no two questions start with the same word. Never write "concise" or "answer with only the number".
+8. Do not build on figures that conflict inside the document, unless the question asks which governs and the document gives the rule (date, hierarchy or scope).
+9. For Adjusted Metric, where the document supports it, leave "no adjustment is acceptable" or "the item is sound" possible as the answer. Never invent a problem.
+10. Never ask for a buy, sell or hold view on a security. A Drafting recommendation may be proceed, proceed with conditions or do not proceed, only if every premise is in the document and it is marked as inference.
+
+MAKE THE DEFECT NATURAL (shape the question so the assigned defect is a mistake a hasty analyst could make; never hint at the right route)
+- headline_number: ask for "EBITDA" or "net debt" where the document gives both a reported and a defined figure, without saying which.
+- wrong_adjustment: include an add-back that looks reasonable but that the document rejects, and one that it accepts.
+- calculation_slip: require a step with a period, denominator, sign or unit (a margin, an annualisation, a share of a total).
+- no_workings: require a calculation of at least 3 steps.
+- omitted_element: name at least 4 elements.
+- advice_not_draft: frame it as a deadline ("the MD needs the page this afternoon") and ask for the page itself.
+- generic_content: ask for elements that depend on this entity's own customers, risks and dates.
+- unsupported_claim: include one element about outlook, context or cause that the document answers only partly.
+- overstated_certainty: include one element that the document states as an estimate, forecast or condition.
+- wrong_definition: use a term the document defines differently from the textbook (adjusted EBITDA, net debt, covenant ratio).
+- off_by_one: make the count, row, period or threshold close to a neighbouring one (9 clean and 2 qualified positives in a sample of 12).
+- padded: Short Answer only.
+
+CHOSEN ANSWER (it must pass all of these)
+- Grounded: every claim is in the document or follows from it by arithmetic or necessary logic. No outside facts, filled-in gaps, market conventions, causes inferred from correlation, or forecasts presented as actuals. A judgment (recommendation, ranking, draft) needs every premise in the document and is marked as inference. Paraphrase and compute; copy no run of more than 8 words.
+- Correct numbers: recompute every figure from the document's numbers at full precision and round only at the end. Check inputs, formula, denominator, sign, unit, scale and period. Never mix percent, percentage points and basis points. Where the document defines or adjusts a metric, use its definition, not the headline or textbook one. Name any convention you had to choose. Show percentages to one decimal, multiples to two, amounts at the document's precision. Keep the document's currency and unit words (crore, lakh, million) as written, never converted, and write each figure in the unit form of the question's basis (percent stays percent, a multiple stays x).
+- Faithful scope: keep the exact entity, period, as-of date and basis. Keep actual apart from forecast, and management's view apart from an auditor's finding. Never state more certainty than the document does.
+- Complete: answer every element in your question, explicitly, with its figure and qualifier. A draft is the document itself, in the order a practitioner would use; an outline, a partial draft or advice about it is not a draft. If something is not in the document, say it is not provided and give no figure.
+- Consistent: narrative and numbers agree, the workings lead to the stated figure, and there is one final result.
+- Worth teaching: no preamble, restated question, disclaimer, placeholder, padding, repetition, promotional language, invented names, citations or quotations, or unrequested advice. Use HTML tables only where the question asks, with single-quoted attributes so the JSON stays valid.
+Structure by type:
+- Drafting: follow the layout line for headings and opening. Cover the elements in the question's order, one paragraph each: the claim first, then the figures with unit and period, then (when the document has several labelled documents) the label in brackets, for example [DOC-2]. A risk paragraph names the risk, ties it to a fact in the document, states its effect and a mitigant or open item. 80 to 150 words per element, 900 at most, no closing summary.
+- Adjusted Metric: line 1 the final figure with its label; then one line per adjustment (name, amount, accepted or rejected, the document's reason); then the arithmetic as labeled steps and the derived measure. The last line is exactly: Answer: <figure> <unit>. 60 to 250 words.
+  Form only: "Underwritten FY2025 EBITDA is 94.7. Reported EBITDA is 92.4. Legal settlement, 2.3: accepted, the signed settlement agreement is in the data room. Owner compensation, 6.0: rejected, no market benchmark is provided. 92.4 + 2.3 = 94.7. Margin on revenue of 612.0 is 15.5%. Answer: 94.7 crore"
+- Short Answer: the count out of the total, the percentage and the defining test, in one to three sentences, 15 to 60 words.
+
+NOT-PREFERRED ANSWER
+- The chosen answer with ONE defect applied in ONE place, plus the consequences needed to keep it consistent. It follows the same layout line.
+- Everything else stays word for word identical: figures, qualifiers, structure, headings, tone, confidence. Add or remove no hedge except where the defect needs it.
+- It reads as a fluent answer by a competent analyst who made one mistake without noticing: no artifact, placeholder, hint of the mistake or mention of limits.
+- The defect is real enough that a strict judge scores the answer below 7. It may break only the check named for it; in every other respect it is grounded, consistent and well written.
+- Length against the chosen answer, in words: 0.5 to 0.8 times for omitted_element and no_workings; 1.3 to 1.8 times for padded; within 25 percent for every other defect. Rewrite only the affected sentence or claim and keep the rest; never delete content to shorten, because a shorter answer teaches the model that shorter is worse.
+How to apply each defect (examples show form only):
+- omitted_element (breaks completeness): delete the paragraphs or lines of 2 or 3 named elements (1 if only 3 or 4 are named) without mentioning them. Example: the question names a bridge, a margin, a concentration and a reference-call result; the answer keeps the bridge and the margin.
+- advice_not_draft (breaks completeness and teachability): replace the finished text with advice on how to write it, using the same facts. Example: "[Customer] is [x]% of FY[year] revenue and its contract ends in [n] months." becomes "The section should give the largest customer's share of revenue and flag when its contract ends."
+- generic_content (breaks completeness and grounding): in at least half the sentences, replace the document's names, figures and dates with statements that fit any deal. Example: the sentence above becomes "Revenue is concentrated in a few customers, so losing one would hurt results."
+- unsupported_claim (breaks grounding): replace one supported sentence with a plausible claim the document does not contain, stated as fact. Example: "Renewal terms have not been negotiated." becomes "Customers in this sector renew at about 90 percent, so renewal risk is low."
+- overstated_certainty (breaks scope): remove the qualifier from one estimate, forecast or condition. Example: "Management expects growth of about [g] percent" becomes "Revenue will grow [g] percent".
+- headline_number (breaks numbers and scope): give the reported figure where the document defines an adjusted one, carried through every dependent figure; keep the same lines but state each adjustment as noted and not applied.
+- wrong_adjustment (breaks numbers): accept an adjustment the document rejects, or reject one it accepts, carried through the total and the derived measure. Example: accepting a rejected add-back A gives U + A and a margin of (U + A) over revenue.
+- calculation_slip (breaks numbers): one wrong step (period, denominator, sign, unit, discount factor) carried to the final figure, workings still visible. Example: "[a] x [r]" becomes "[a] x [r] x 11/12".
+- no_workings (breaks numbers and completeness): a WRONG final figure with the reasoning cut to one or two sentences. The same correct figure without workings is not this defect.
+- wrong_definition (breaks scope and grounding): the textbook definition where the document defines the term differently, carried through. Example: net debt as borrowings less cash where the document also counts lease liabilities.
+- off_by_one (breaks numbers and scope): the adjacent count, row, period or threshold, one more or one fewer than the document supports, carried through. Example: "[k] of [n]" becomes "[k+1] of [n]".
+- padded (breaks teachability): Short Answer only. The same correct content, 1.3 to 1.8 times as long, through repetition and unrequested headings.
+
+THINKING
+`chosen_thinking` and `rejected_thinking` are first-person traces of 70 to 150 words (up to 250 for Adjusted Metric), each wrapped in <think>...</think>, with no headings or bullets, in four moves of one or two sentences. Chosen: (1) what the question asks and the specific figure or fact used; (2) the calculation or inference step, kept apart from stated facts; (3) the mistake a hasty analyst would make; (4) the conclusion. Rejected: the same four moves, but move (3) is a plausible alternative you considered and set aside, never the real defect. It reasons sincerely to its own answer without noticing the defect, never names it, and is about as long as the chosen trace (within 25 percent), never shorter and thinner. Neither trace repeats the answer.
+
+NUMERIC CHECK
+For Adjusted Metric fill `numeric_check`: `expression` (numbers and + - * / ( ) ** only, equal to the chosen final figure, for example 92.4+2.3), `final_value` (number), `unit`, `rejected_value` (the not-preferred final figure, a number different from final_value). For every other type use an empty object.
+
+EVIDENCE
+`evidence`: 3 to 6 short quotes (25 words or fewer each), copied character for character from the document, for the figures and facts that your question and chosen answer rely on. A script checks each one.
+
+OUTPUT
+Return only a valid JSON array. Each object has exactly these keys:
+{{
+  "question_type": "...",
+  "defect_type": "...",
+  "question": "...",
+  "chosen_thinking": "<think>...</think>",
+  "chosen": "...",
+  "rejected_thinking": "<think>...</think>",
+  "rejected": "...",
+  "numeric_check": {{}},
+  "evidence": ["..."]
+}}
+Use the exact question-type and defect labels. Valid JSON with double quotes, newlines inside strings written as \\n, escaped quotation marks, no Markdown fences, comments, trailing commas, nulls or extra keys.
+"""

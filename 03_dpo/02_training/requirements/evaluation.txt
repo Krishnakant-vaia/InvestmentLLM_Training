@@ -1,0 +1,8 @@
+vllm
+transformers
+requests
+boto3
+pyyaml
+python-dotenv
+pandas          # eval bank workbook (04_evaluation/run_eval_bank.py)
+openpyxl        # .xlsx reader for pandas

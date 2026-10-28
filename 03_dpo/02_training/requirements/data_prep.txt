@@ -1,0 +1,4 @@
+datasets>=2.19
+boto3
+pyyaml
+python-dotenv

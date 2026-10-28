@@ -1,0 +1,25 @@
+# Pinned to a combination Unsloth supports. Unpinned "latest" broke: trl 1.14 removed
+# ConstantLengthDataset, which unsloth_zoo still imports. Unsloth 2026.9.12 requires
+# trl <= 0.24.0 and transformers <= 5.5.0; transformers 5.5.0 includes Qwen3.5 (qwen3_5_text).
+# Change these together, never one at a time.
+
+# REQUIRED for Qwen3.5: 24 of its 32 layers are linear-attention (Gated DeltaNet). Without this
+# package transformers silently falls back to a pure-PyTorch version that needs tens of GB more
+# memory (a single 25k-token row ran a 80 GB H100 out of memory) and is far slower. The log line
+# to look for is: "The fast path is not available because one of the required library is not
+# installed". Pure Python + Triton kernels, no compile step. (causal-conv1d, the other library
+# named in that message, needs a CUDA build and only replaces a small conv: skipped.)
+flash-linear-attention==0.5.2
+unsloth==2026.9.12
+unsloth_zoo==2026.9.8
+trl==0.24.0
+transformers==5.5.0
+peft
+bitsandbytes
+accelerate
+datasets>=3.4.1,<4.4.0
+numpy
+pyyaml
+boto3
+python-dotenv
+wandb

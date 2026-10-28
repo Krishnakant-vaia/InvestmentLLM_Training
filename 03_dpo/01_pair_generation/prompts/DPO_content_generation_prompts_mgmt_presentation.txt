@@ -1,0 +1,73 @@
+GENERATION_PROMPT = """\
+ROLE
+You are a senior investment professional and pitch-deck editor writing preference-training data for an LLM that drafts management presentations. Be precise and neutral.
+
+DECK
+<document>
+{chunk_text}
+</document>
+
+One company, transcribed as SLIDE n | type | content, starting with a STAGE line. It is the sole evidence: no outside facts or figures.
+
+ASSIGNMENT
+- Question types, in order: {question_types}
+- Defect types, in order: {defect_types}
+- Answer layout: {style}
+
+Write one pair per assignment. Skip an assignment the deck cannot support or the defect cannot fit. Return [] if the deck has no usable content.
+
+THE STANDARD
+Both answers are fluent, professional and the same length and layout. They differ in ONE place: the chosen answer shows the extra effort below, the rejected answer has exactly one defect there. A reader comparing them must find a single, specific difference and see why the chosen is better.
+
+QUESTION TYPES
+- Slide Drafting: one slide for this company and stage (type, headline, 3-6 items).
+- Deck Outline: the slide sequence for a section or the whole deck (type, headline, purpose per slide).
+
+QUESTION RULES
+- The question is all the trained model sees, so it carries the facts: 1-2 sentences of request, then "Company brief:" and 5-10 fact lines from the deck (name, stage, figures with units and periods, customers, team, claims, qualifiers). 60-200 words. Never give the slide's headline or wording.
+- Start with a verb; never "Based on", "According to" or "Using the". No two questions in a call start with the same word.
+- Ask for content, structure and order only, never colors, fonts or images.
+- Name 4 or more elements when the defect is omitted_element; include one projection when it is overstated_certainty; include one figure with a period when it is off_by_one.
+
+CHOSEN ANSWER (the effort)
+- Every claim is in the brief; figures keep unit, period and actual-versus-projected status. Never invent; write "not provided" for gaps.
+- Each headline is a takeaway sentence carrying its key figure or fact, not a label ("ARR reached 4.2M in FY24", not "Traction").
+- Each body item is a specific fact (figure, name, date or result), at most 6 items and about 80 words per slide, most important first.
+- Slide type fits the content: team = people with prior employers, financials = a table, traction = metrics and customers, problem = cost of the problem.
+- Order follows the deck's stage and narrative: context and problem, solution and product, evidence, market, then the ask. Outlines give each slide a one-clause purpose tied to a fact.
+- Follow the layout line. Types: title, problem, solution, product, market, business_model, traction, competition, team, financials, roadmap, closing, other. 900 words at most; no preamble or placeholders.
+
+REJECTED ANSWER (one defect)
+Copy the chosen answer. Change only the spot below and what depends on it. Everything else stays word for word, with the same tone and no hint of error.
+- omitted_element: delete 2 requested slides or items (1 if only 3 are named); length 0.5-0.8 times.
+- wrong_order: move one slide at least 3 places from its place in the narrative.
+- wrong_slide_type: change one slide's type and rewrite its body to match (a financial table as bullets, a team grid as a paragraph).
+- overstuffed_slide: merge the items of 2 slides onto one slide, reaching 9 or more items.
+- advice_not_draft: turn one slide's body into guidance ("This slide should state..."), same facts.
+- generic_content: in half or more of the sentences, swap the brief's names and figures for statements that fit any startup.
+- unsupported_claim: replace one item with a plausible claim not in the brief.
+- off_by_one: change one figure, count or date to a nearby wrong value, carried through.
+- overstated_certainty: delete the qualifier on one projection or estimate.
+Length stays within 25 percent of the chosen answer except omitted_element.
+
+THINKING
+chosen_thinking and rejected_thinking: first person, in <think>...</think>, 70-150 words each, within 25 percent of each other. Four moves: (1) what is asked and the brief facts used; (2) how slides are typed, ordered and worded; (3) a plausible alternative set aside; (4) the conclusion. The rejected trace reasons sincerely to its own answer and never names its defect.
+
+EVIDENCE
+3-6 verbatim quotes from the deck, 25 words or fewer each, supporting the brief.
+
+OUTPUT
+Return only a valid JSON array. Each object has exactly these keys:
+{{
+  "question_type": "...",
+  "defect_type": "...",
+  "question": "...",
+  "chosen_thinking": "<think>...</think>",
+  "chosen": "...",
+  "rejected_thinking": "<think>...</think>",
+  "rejected": "...",
+  "numeric_check": {{}},
+  "evidence": ["..."]
+}}
+Use the exact assigned labels; numeric_check is always {{}}. Valid JSON with double quotes and \\n for newlines inside strings; no Markdown fences, comments, trailing commas, nulls or extra keys.
+"""

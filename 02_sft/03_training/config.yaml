@@ -1,0 +1,204 @@
+# =============================================================================================
+# Single source of truth for every step. Relative paths are relative to this folder.
+# Secrets never go here: they live in .env (AWS, wandb, Cloudflare). See README.md.
+# =============================================================================================
+
+# ---- The model we fine-tune -----------------------------------------------------------------
+model:
+  base: Qwen/Qwen3.5-9B          # public base model; used only as a tokenizer fallback
+  pretuned:                      # SFT starts from this pre-tuned full-weights model, not from base
+    s3_prefix: s3://ft-vaia/Corpus/Invest_dataset/09022026_pretune_results/merged_model/
+    full_weights_subdir: null    # auto-detected; pin a bucket-relative folder if several exist
+    local_dir: models/pretuned   # downloaded here on first use (~18 GB)
+  max_seq_length: 12000          # longest QA pair allowed, in tokens. Longer ones are dropped whole,
+                                 # never cut. That drops ~255 of 208,018 rows (0.12%, 0.6% of the tokens),
+                                 # all tool-calling; domain (longest 8,517) and general (5,255) lose none.
+                                 # Why 12k: GPU memory grows with the tokens in a micro-batch (see
+                                 # training.tokens_per_micro_batch), and a 25k-token row alone filled an 80 GB H100.
+  load_in_4bit: false            # false = BF16 LoRA (base weights kept in full 16-bit precision)
+
+# ---- Step 1: training data -------------------------------------------------------------------
+data:
+  seed: 3407                     # one seed for every shuffle/split/sample, so runs are reproducible
+  val_fraction: 0.01             # share of each source held out for validation (never trained on)
+  pool:                          # the one training file on S3, used exactly as provided
+    s3_uri: "s3://ft-vaia/Corpus/Invest_dataset/09032026_SFTQ&Apairs/sft_data_finetune_pool_178k.jsonl"
+    local_path: data/raw/sft_data_finetune_pool_178k.jsonl
+    blocks:                      # the file is these sources one after another, in this order
+      - {source: domain, rows: 175788}        # VaiaGPT finance QA (file of 2026-10-01 12:34 UTC, documents removed)
+      - {source: tool_calling, rows: 18924}   # function-calling chats (glaive-style system prompts)
+      - {source: general, rows: null}         # null = the rest of the file (11,076 general chats)
+  out_dir: data/processed        # step 1 writes train.jsonl, val.jsonl, stats.json here
+
+# ---- Step 2: fine-tuning ---------------------------------------------------------------------
+training:
+  output_dir: outputs/sft        # each run trains in outputs/sft/<run_name>/
+  epochs: 1                      # passes over the training data
+
+  # How QA pairs are grouped into micro-batches (sft_common/batching.py).
+  batching_mode: padded          #   padded - rows padded to the longest; similar lengths grouped;
+                                 #            long rows go alone. Safe with any attention setup.
+                                 #   packed - no padding. The longest row starts a micro-batch and
+                                 #            the gap is filled best-fit (largest row that still
+                                 #            fits, repeatedly), so micro-batches are ~full and
+                                 #            nothing trains alone. Checked before training, but
+                                 #            NEEDS flash-attention-2 installed: without it, packed
+                                 #            rows leak into each other (confirmed on the Daytona
+                                 #            H100 test image, which has no FA2 - see benchmark
+                                 #            2026-09-29_12-55: packing check reported LEAK, and
+                                 #            the missing varlen kernel also caused an OOM at the
+                                 #            smallest size). Stick with padded until FA2 is verified.
+  tokens_per_micro_batch: 12000  # token budget per micro-batch (the main GPU-memory knob).
+                                 #   packed: sum of row lengths <= this
+                                 #   padded: rows x longest row <= this
+                                 # Kept >= model.max_seq_length so the longest allowed row fits alone.
+                                 # Memory is ~2.6 MB per token (measured: 25,006 tokens -> 84 GB on an
+                                 # H100, of which 18 GB is weights; consistent with the 248k-word
+                                 # vocabulary output layer: ~2.5 MB/token), so 32k tokens can never fit
+                                 # on 80 GB. `sft_train.py --benchmark 1,2,4,8` tests 12k / 24k / 48k / 96k.
+  max_rows_per_micro_batch: 64   # cap on QA pairs sharing one micro-batch
+  packing_check_tolerance: 0.01  # packed mode: max loss difference, rows one-by-one vs packed
+                                 # (bf16 noise is well below 1%; a leak between rows is not)
+  grad_accum_steps: 10           # micro-batches per optimizer step (~120k tokens per step, as before)
+  lean_loss: true                # score only the answer tokens (sft_common/lean_loss.py): the same maths as the
+                                 # standard loss (tested, and re-checked on a real batch before every run) but
+                                 # measured 1.6-2x faster on the H100 at the same memory (probe, 12k tokens:
+                                 # 5.2-5.8k vs 2.7-3.4k tokens/s). false = the standard loss.
+  loss_check_tolerance: 0.02     # max relative difference between lean and standard loss on a real batch
+
+  # Optimisation.
+  learning_rate: 1.0e-4          # peak learning rate
+  keep_best: true                # keep the lowest-val-loss checkpoint (+ latest); final adapter = best. Needs eval_steps == save_steps
+  cpu_workers: 16                # parallel CPU processes: tokenizing + batch loading (sandbox has many cores)
+  warmup_ratio: 0.03             # first 3% of steps ramp the learning rate up from 0
+  lr_scheduler: cosine           # then a smooth decay to ~0
+  weight_decay: 0.01
+  max_grad_norm: 1.0             # clip the size of each update (guards against loss spikes)
+  optimizer: adamw_8bit          # AdamW with 8-bit state: same results, less GPU memory
+
+  # Monitoring and saving.
+  logging_steps: 10              # train loss logged every 10 optimizer steps
+  eval_steps: 200                # val loss every 200 optimizer steps...
+  eval_rows: 500                # ...on this many fixed val rows (keeps evals quick)
+  save_steps: 200                # checkpoint every 200 steps; each is uploaded to S3 at once
+  save_total_limit: 3            # local copies kept (S3 keeps every checkpoint)
+
+  # LoRA: small trainable matrices added to the frozen model; only these are trained.
+  lora:
+    r: 64                        # rank of each LoRA matrix pair (capacity of the update)
+    alpha: 128                   # scale of the LoRA update
+    dropout: 0.0
+    use_rslora: true             # rank-stabilised scaling
+    # Qwen3.5 has two attention kinds: 8 full-attention layers (q/k/v/o_proj) and 24 linear-attention
+    # layers (in_proj_qkv, in_proj_z, out_proj). All 32 layers have the MLP (gate/up/down_proj).
+    # The linear-attention names were missing before, which left those 24 layers' attention frozen.
+    # (in_proj_a / in_proj_b are tiny: 32 outputs, smaller than the rank, so they are left out.)
+    target_modules: [q_proj, k_proj, v_proj, o_proj, in_proj_qkv, in_proj_z, out_proj,
+                     gate_proj, up_proj, down_proj]
+
+  wandb:
+    enabled: true                # used only if WANDB_API_KEY is set in .env
+    project: vaia-sft-qwen35-9b
+
+# ---- Step 3: merging -------------------------------------------------------------------------
+merging:
+  merged_dir: outputs/merged     # each run's merged model goes to outputs/merged/<run_name>/
+
+# ---- Step 4: evaluation ----------------------------------------------------------------------
+evaluation:
+  out_dir: outputs/eval          # each run's results go to outputs/eval/<run_name>/
+  val_file: data/processed/val.jsonl
+  samples_per_source: 200        # held-out rows per source, the same rows for both models
+  max_model_len: 32768           # vLLM context for eval: prompt + answer. Deliberately NOT the training
+                                 # row limit: val rows are not filtered (the longest is 16,437 tokens) and
+                                 # domain answers may generate up to 4,096 tokens on top of the prompt.
+  thinking_sources: [domain]     # sources evaluated with reasoning on (trained with reasoning)
+  max_new_tokens:                # generation limit per source
+    domain: 4096                 # reasoning + answer
+    default: 1024
+  judge:
+    enabled: true                # needs CLOUDFLARE_ACCOUNT_ID / CLOUDFLARE_API_TOKEN in .env
+    model: "@cf/openai/gpt-oss-120b"   # Cloudflare Workers AI
+    sources: [domain]            # which sources get judged
+    max_tokens: 2048             # room for the judge's own reasoning + its JSON verdict
+    workers: 8                   # parallel judge requests
+
+# ---- Step 6: DPO (preference tuning) on top of the SFT-merged model --------------------------
+# Trained from 03_dpo/02_training (see its README_DPO.md); kept here because merge/eval/tokens accept dpo-... runs.
+dpo:
+  base:                          # the model DPO starts from AND the frozen reference: the merged SFT model, BF16
+    s3_uri: s3://ft-vaia/Corpus/Invest_dataset/092826_SFT_FineTune_Model/Fine_Tune_Run_2/merged_models/sft-2026-10-01_23-20_final/
+    local_dir: models/sft_merged
+  data:
+    s3_uri: null                 # REQUIRED before training: JSONL, one pair per line: {prompt, chosen, rejected, source}
+                                 #   prompt = the user question (text) or a list of chat messages; source = any label (domain, general...)
+    local_path: data/raw/dpo_pairs.jsonl
+    val_fraction: 0.05           # share of each source's PROMPTS held out (a prompt is never in both train and val)
+    val_cap_per_source: 500      # at most this many val pairs per source (keeps evals quick)
+    max_length_ratio: 2.0        # drop a pair whose answers differ more than this in tokens (else DPO learns length, not quality)
+    drop_think_mismatch: true    # drop a pair if only one of its answers has a <think> block
+  output_dir: outputs/dpo        # each run trains in outputs/dpo/<run_name>/
+  s3_root: s3://ft-vaia/Corpus/Invest_dataset/100626_Dataset_DPO/DPO_Run_1/   # one folder per DPO run inside (where the DPO runs actually live)
+  epochs: 1
+
+  # Memory. A pair is two sequences (chosen + rejected) and the reference needs a forward pass too,
+  # so the SFT limits are halved: the longest allowed pair is 2 x 6,000 = 12,000 tokens, the size SFT proved on an H100.
+  max_pair_tokens: 6000          # longest allowed side (prompt + answer). Longer pairs are dropped whole, never cut
+  tokens_per_micro_batch: 12000  # both sides of every pair in a micro-batch count; padded to the longest
+  max_rows_per_micro_batch: 16   # cap on pairs sharing one micro-batch
+  grad_accum_steps: 8            # micro-batches per optimizer step (about 30-50 pairs per step)
+  loss_chunk: 2048               # vocabulary scores are computed this many answer tokens at a time (248k-word vocabulary)
+
+  # Optimisation. Deliberately gentle: DPO moves the model relative to the SFT model, and SFT already drifted once.
+  learning_rate: 1.0e-5
+  beta: 0.1                      # how strongly the model is held to the SFT model (higher = stays closer)
+  label_smoothing: 0.0           # >0 = assume some pairs are mislabelled (robust DPO)
+  sft_alpha: 0.0                 # >0 adds this x the chosen answers' negative log-likelihood (RPO): stops the chosen
+                                 # answers' probability from falling. Turn on if the log shows logps/chosen dropping.
+  warmup_ratio: 0.1
+  lr_scheduler: cosine
+  weight_decay: 0.0
+  max_grad_norm: 1.0
+  optimizer: adamw_8bit
+  logging_steps: 5
+  eval_steps: 25                 # eval per source every 25 steps, and once before training (the baseline)
+  save_steps: 25                 # checkpoint every 25 steps, each uploaded to S3 at once
+  save_total_limit: 3
+  lora:                          # a NEW adapter on the merged SFT model (the SFT adapter is already inside its weights)
+    r: 64
+    alpha: 128
+    dropout: 0.0                 # 0: the reference pass must be exactly the policy with adapters off
+    use_rslora: false            # scale alpha/r = 2 (SFT used rsLoRA = 16): a much smaller step per learning rate
+    target_modules: [q_proj, k_proj, v_proj, o_proj, in_proj_qkv, in_proj_z, out_proj, gate_proj, up_proj, down_proj]
+  wandb:
+    enabled: true
+    project: vaia-dpo-qwen35-9b
+  ttl_minutes: 720               # hard lifetime cap of the DPO sandbox (12 h)
+
+# ---- Where every run is saved (S3) -----------------------------------------------------------
+storage:
+  s3_root: s3://ft-vaia/Corpus/Invest_dataset/092826_SFT_FineTune_Model/Fine_Tune_Run_2/   # this round's folder: one folder per run inside.
+                                 # Round 1 is archived in ../Fine_Tune_Run_1/ (point s3_root there to read it)
+  upload_train_jsonl: true       # also keep the exact training file (~3 GB) with the run
+
+# ---- Running on a Daytona GPU sandbox (06_daytona/daytona_run.py) ----------------------------
+daytona:
+  gpu: H100,H200                 # tried in this order; the first with capacity is used.
+                                 # Options: H100 (80 GB), H200 (141 GB), RTX_PRO_6000 (96 GB), B300 (275 GB)
+  spot: true                     # spot = cheaper but can be taken away at any moment (S3 checkpoints make
+                                 # that survivable); false = on-demand (needs GPU top-up on the account)
+  image: pytorch/pytorch:2.11.0-cuda12.8-cudnn9-runtime   # CUDA + PyTorch base for the sandbox
+  ttl_minutes: 240               # hard cap for benchmark/smoke sandboxes: Daytona deletes them after this long,
+                                 # whatever happens (even if the launcher script dies)
+  train_ttl_minutes: 2400        # the same cap for the full training run (40 h). Must exceed the run's ETA;
+                                 # a checkpoint is on S3 every save_steps, so hitting it loses little
+  smoke_steps: 20                # optimizer steps of `daytona_run.py smoke` (2 checkpoints + 2 evals inside)
+  benchmark_sizes: "1,2,4,8"     # micro-batch sizes tested by `daytona_run.py benchmark`
+
+# ---- Steps 5 and 8: serving on Modal ---------------------------------------------------------
+deployment:
+  modal_volume: sft-models           # Modal volume that holds the merged model
+  model_subdir: merged               # folder inside the volume
+  served_model_name: vaia-qwen35-9b
+  gpu: A100-80GB                     # 80 GB needed for the full context below
+  max_model_len: 262144              # per request (prompt + answer); ~8.6 GB cache at full length

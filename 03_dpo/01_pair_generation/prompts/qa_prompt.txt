@@ -1,0 +1,97 @@
+GENERATION_PROMPT = """\
+ROLE: You are a senior investment professional at an Indian private-markets and credit investment firm, with working experience of PE deals and IC papers, credit analysis and loan documentation, fund and LP reporting, and valuation. You are writing preference-training data for an investment LLM. Write each question the way a colleague at your firm would ask it, and write every answer in neutral, precise analyst prose.
+
+<document>
+{chunk_text}
+</document>
+
+ASSIGNMENT (fixed by the pipeline):
+- Question types, in order: {question_types}
+- Defect for each not-preferred answer, in the same order: {defect_types}
+
+For each assigned type, write one pair: a question, a CHOSEN answer, and a NOT-PREFERRED answer (stored under the key `rejected`). Skip a type if the document cannot support a non-trivial question of that type, or if its defect cannot apply to your question. Never substitute another type or defect. Return [] if the document has no decision-useful content.
+
+SIZE
+The model sees the system prompt, this document and your question, then writes its reasoning and answer, all within about 5,000 tokens. The document uses most of that, so:
+- Reasoning trace (`chosen_thinking`, `rejected_thinking`): 70-150 words in <think>...</think>, first person, no headings or bullets; up to 250 words for Calculation/Numerical, Adjusted Metric, Rating/Notching and Waterfall/Distribution. `rejected_thinking` has about the same number of sentences and words as `chosen_thinking` (within 25%): it is never the shorter, thinner trace.
+- Drafting answers: 400-900 words, at least 80 words for each element the question names.
+- All other answers: at least 15 words; usually 40-250 words, never more than 450.
+Never cut required content; write a narrower question instead.
+
+QUESTION TYPES
+- Calculation/Numerical: a multi-step calculation (DCF, returns, coverage, leverage) from document figures.
+- Adjusted Metric: apply the document's own definition of a metric (adjusted EBITDA, covenant ratio, net debt) where it differs from the headline figure.
+- Rating/Notching: step through a rating scale notch by notch, or compute a weighted scorecard term by term.
+- Waterfall/Distribution: run a distribution tier by tier (return of capital, preferred return, catch-up, carry).
+- Drafting: ask for a document or a named page of one ("Draft the risk section of the IC memo for..."), naming every element it must contain.
+- High-Order Reasoning: a thesis, the strongest counterargument from the document, and a resolution.
+- Error Identification: find a flaw, inconsistency or unsupported assumption and its correction; "the item is sound" is a valid finding.
+- Applied/Scenario: a practitioner decision with one recommendation and one document-based condition that could invalidate it.
+- Interpretation & Analysis: separate what the figures show from what they may signal.
+- Comparative Ranking: rank two or more items on a criterion, using only items, values and a criterion that the document itself gives; the ranking must follow from the document's own figures or statements.
+- Terminology: define a term as this document uses it, with one edge case.
+- Short Answer: the correct answer is one to three sentences.
+
+QUESTION RULES
+- Answerable from the document alone, with one unambiguous entity, period, metric and basis. Before keeping a question, be able to point to the sentence(s) in the document that answer it; if you cannot, skip that type. Do not build a question on figures the document leaves in conflict, and do not invent a hypothetical company or scenario the document does not describe.
+- The model sees the document above the question, so you may say "the document". Do not quote or reveal the answer.
+- Where the document allows, set a trap: a phrasing that invites the headline figure, the textbook definition, the adjacent stage or the single obvious driver.
+- Where the document supports it, make "none", "no adjustment needed" or "the item is sound" the correct answer. Never invent a problem.
+- Never ask for a URL, page title, contact detail, price or product plan: those are not decision-useful. The chosen answer must always be a real answer of at least 15 words.
+- Vary how questions open and are framed. Never use "concise" or "answer with only the number", except in Short Answer.
+
+CHOSEN ANSWER
+Before writing, work out silently: the setting (entity, period, basis); each sub-question; the trap and the document fact that defeats it; every number to derive; and the break points the document itself states.
+
+A strict judge checks the chosen answer on every point below:
+- Every claim comes from the document or follows from it by arithmetic or necessary logic. No outside facts, benchmarks or generic risks. Judgments (recommendations, rankings, drafts) are allowed when every premise is in the document, and are marked as inference.
+- Every number is recomputed from the document's figures at full precision, rounded only at the end, with unit, period and basis kept. Where the document defines or adjusts a metric, use its definition. Test the strongest alternative reading (reported vs adjusted, gross vs net) and make sure the document settles it.
+- Every sub-question is answered, with no contradictions. A draft is the document itself, never advice about it.
+- Entity, period and certainty match the document: actual stays apart from forecast, and certainty never exceeds the document's.
+- No preamble, restated question, unrequested advice, disclaimer or padding.
+
+Layout: lead with the conclusion. For Calculation/Numerical, Adjusted Metric, Rating/Notching and Waterfall/Distribution, give the conclusion with its final figure, then labeled workings, then one closing line restating the figure. For other types, do not repeat the conclusion at the end. Use prose. Drafting answers use the headings a practitioner would use, and HTML tables where the question asks for one.
+
+`chosen_thinking` names the specific figure or claim used, separates fact from calculation from inference, names one mistake a hasty analyst would make, and does not repeat the answer.
+
+NOT-PREFERRED ANSWER
+DPO pushes down everything in this answer that differs from the chosen one, so it must differ in nothing except the defect. Copy the chosen answer, apply only the assigned defect, and carry its consequences through so the answer stays consistent. Figures, qualifiers, structure, tone and confidence that the defect does not touch stay identical. It reads as a fluent answer by a competent analyst who made one mistake without noticing: no artifacts, no placeholders, no hint of the mistake, no mention of limits.
+
+DEFECTS
+- headline_number: uses the reported or headline figure instead of the document's defined or adjusted one.
+- wrong_adjustment: accepts an adjustment the document rejects, or rejects one it accepts.
+- calculation_slip: one wrong step (period, denominator, sign, unit, discount factor) carried to a wrong final figure; workings still shown.
+- no_workings: a WRONG final figure (different from the chosen figure) with the reasoning collapsed to one or two sentences. The same correct figure without workings is not this defect.
+- off_by_one: the adjacent stage, notch, tier, rank or period.
+- omitted_element: leaves out 2-3 required elements (1 if only two are named); what remains is correct.
+- advice_not_draft: advises on how to write the document instead of writing it.
+- generic_content: replaces document-specific facts with statements that fit any deal.
+- unsupported_claim: states an inference or outside assumption as reported fact.
+- wrong_definition: uses the textbook definition where the document defines the term differently.
+- single_driver: one driver only; omits the strongest counterargument or second factor the document supports.
+- overstated_certainty: states an estimate or conditional finding as certain.
+- padded: correct but 1.3-1.8x the length, through repetition and unrequested headings (Short Answer only).
+
+Length against the chosen answer, counted in words: 0.5-0.8x for no_workings, omitted_element and single_driver; 1.3-1.8x for padded (a 14-word chosen answer gives an 18-25 word padded one, not 60); for ALL other defects the not-preferred answer is within 25% of the chosen answer's length. For those, rewrite the affected sentence or claim with its defective version and keep every other sentence: do not delete content and do not stop early, because a shorter answer teaches the model that shorter is worse.
+
+`rejected_thinking` has the same form and word limit as `chosen_thinking`; it reasons sincerely to the defect without noticing it. `rejected` states that reasoning's conclusion, adds nothing beyond it, and uses the chosen answer's layout. Keep the chosen answer's hedges unless the defect is overstated_certainty or unsupported_claim, and keep its workings unless the defect is no_workings.
+
+BOTH ANSWERS: no buy, sell or hold advice; no invented tickers, funds, institutions or quotations; no examples labeled hypothetical.
+
+NUMERIC CHECK
+For Calculation/Numerical and Adjusted Metric only, fill `numeric_check` so a script can verify the chosen figure: `expression` (numbers and + - * / ( ) ** only, evaluating to the chosen final figure), `final_value` (number), `unit`, and `rejected_value` (the not-preferred final figure, as a number). For every other type use an empty object.
+
+OUTPUT
+Return only a valid JSON array. Each object has exactly these keys:
+{{
+  "question_type": "...",
+  "defect_type": "...",
+  "question": "...",
+  "chosen_thinking": "<think>...</think>",
+  "chosen": "...",
+  "rejected_thinking": "<think>...</think>",
+  "rejected": "...",
+  "numeric_check": {{}}
+}}
+Use the exact question-type and defect labels. Valid JSON with double quotes, newlines inside strings written as \\n, escaped quotation marks, no Markdown fences, comments, trailing commas, nulls or extra keys.
+"""

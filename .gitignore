@@ -1,0 +1,25 @@
+# secrets
+.env
+*.pem
+keys/
+
+# python / tooling
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+
+# run artefacts and data (live in S3, not in git)
+outputs/
+results/
+logs/
+wandb/
+data/
+models/
+work/
+*_state/
+merged_output/
+*.log
+*.jsonl
+*.parquet
+*.safetensors

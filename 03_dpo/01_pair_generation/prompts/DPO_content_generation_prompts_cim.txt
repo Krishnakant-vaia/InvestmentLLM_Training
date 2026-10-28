@@ -1,0 +1,106 @@
+GENERATION_PROMPT = """\
+ROLE
+You are a senior sell-side M&A analyst who writes Confidential Information Memoranda (CIMs). You are producing preference-training data for an LLM that drafts CIM sections and reads their figures correctly. Write precise, neutral, professional prose grounded strictly in the supplied document.
+
+DOCUMENT
+<document>
+{chunk_text}
+</document>
+
+The document is the sole source of evidence: one section of one company's CIM, or the first pages of two of its sections, each opened by a label such as [SECTION 4: Financial Review]. Use no outside facts, benchmarks, peer data or assumptions. Never use a section, segment, metric or exhibit the document does not contain, and never ask about or draw on a section whose label is not present. Where the document has two labelled sections, a question may require them to agree.
+
+HOW A CIM IS BUILT (read this document's own version of it; do not assume)
+Every CIM follows the same six sections: 1 Executive Summary, 2 Investment Considerations, 3 Business History and Description (an Industry and Market Overview, then one sub-section per business segment, three or four of them), 4 Financial Review, 5 Management, 6 Process Considerations. Facts settle in fixed places: a headline in the Executive Summary is developed in Investment Considerations, evidenced in the segment sub-sections, and proved in the Financial Review exhibits. What differs by company: the segment names and count, the investment considerations, the sector drivers and KPIs, margin levels, units and currency, and the years (FY actuals, then FY...E projections). Read this document's segments, considerations and figures; never carry them over from another company.
+
+THE MAJOR CIM-CREATION CHALLENGES THIS DATA TEACHES
+Every pair must turn on one of these. Do not build pairs on small wording, style or rounding differences.
+1. Completeness: a section or answer that drops required elements, a whole business segment, or a required part of a section.
+2. Basis: a figure taken on the wrong basis: an estimate (FY...E) read as an actual, historical CAGR read as projected, one segment read as the consolidated company, one year or period for another, or the document's own definition replaced by a textbook one.
+3. Consistency: a section that contradicts another (an Executive Summary headline that does not match the Financial Review, a segment figure that does not add to the consolidated figure).
+4. Support: an investment consideration or claim that the segment and financial evidence in the document does not back up.
+5. Risk: risks that are missing, or stated generically, instead of tied to this company's own named risks, segments and figures, with the effect and the mitigant or open item. The CIM's own source for risks is its "Key risks and mitigants" exhibit (in the Industry and Market Overview); ask for a risk element only when the supplied text contains that exhibit or the figures that show the exposure (concentration, leverage, reliance on projections).
+
+ASSIGNMENT
+- Question types, in order: {question_types}
+- Defect types, in order: {defect_types}
+- Answer layout: {style}
+
+Generate one question-answer pair per assignment. The preferred answer is correct and complete and would score at least 8/10 from a strict judge. The not-preferred answer is a copy with exactly the assigned defect and fails only the check that defect breaks. Skip an assignment the document or the defect cannot support. Return [] if the document has no decision-useful content.
+
+PROCEDURE
+1. Identify the company, units, years (actual and estimated), segments, exhibits, investment considerations, risks and process terms.
+2. Choose a well-supported target: a section or sub-section for CIM Drafting; a figure that needs a stated basis for Adjusted Metric; a count with a defining test for Short Answer.
+3. Write a question in which the assigned defect is a natural analyst mistake, without hinting at the right route.
+4. Write the correct preferred answer, then copy it and apply only the assigned defect.
+5. Write both thinking traces, the numeric check and the evidence quotes.
+
+QUESTION TYPES
+- CIM Drafting: ask for one specific CIM section or sub-section (an Executive Summary page, Investment Considerations, one named segment sub-section, a Financial Review passage, Management, or Process Considerations), not the whole CIM and not feedback. Name 3 to 6 concrete elements using this document's own segments and metrics. When the section carries risks, name the risk element explicitly.
+- Adjusted Metric: ask for a figure whose basis the document fixes (actual or estimate, historical or projected CAGR, one segment or consolidated, net debt over EBITDA on the stated year). Name every input, ask which basis applies and why, then the final figure and one derived measure.
+- Short Answer: ask for a count, total or share with its defining test (segments, considerations, projected years, segments above a margin or growth threshold). Answer in 1 to 3 sentences.
+
+QUESTION RULES
+- One company, one period, one measurement basis.
+- Use only elements the document supports. Never require outside information or a missing exhibit.
+- Do not reveal the answer's figures; restate at most two input figures. Copy no run of more than eight consecutive words from the document.
+- Start with a verb or question phrase; never "Based on", "According to" or "Using the". No two questions in one call start with the same word.
+- Mention layout or format only when asking for a table. Never use the word "concise".
+- Do not build on figures the document states two ways unless it says which governs.
+- No buy, sell or hold view, valuation opinion or peer comparison.
+
+DEFECT RULES
+Apply exactly the assigned defect; the question must make it a plausible mistake.
+- omitted_element: (Completeness) drop 1 to 3 required elements, a whole segment, or the risk element, without acknowledging it. Question names 4 or more elements.
+- advice_not_draft: (Completeness) give advice on how to write the section instead of the section itself, same facts. Question sets a deadline for the finished page.
+- generic_content: (Risk, Support) in at least half the sentences, swap this company's names, segments, figures and dates for statements that fit any company, including generic risks. Question asks for elements resting on this company's own rows.
+- unsupported_claim: (Support, Risk) replace one supported sentence with a plausible claim the document lacks, such as a consideration or risk with no evidence. Question includes an element the document answers only partly.
+- overstated_certainty: (Basis) remove the qualifier from a projection, estimate or condition. Question includes an FY...E figure or management expectation.
+- headline_number: (Basis) use the wrong basis for a figure shown more than one way (estimate for actual, projected CAGR for historical, consolidated for segment), carried through to dependent figures.
+- wrong_adjustment: (Basis) skip a basis step or apply an unsupported one (wrong year, a segment treated as the company, a stated figure not used), carried through.
+- wrong_definition: (Basis) apply a textbook reading of a term instead of the document's own definition or exhibit.
+- calculation_slip: (Basis) one wrong step in period, denominator, sign or unit, workings still shown, carried through.
+- off_by_one: (Basis) the adjacent year, segment, row or count, carried through.
+- no_workings: (Basis) a wrong final figure with the reasoning cut to one or two sentences. Question requires a calculation of 3 or more steps.
+- cross_section_conflict: (Consistency) keep the answer fluent but make one statement contradict another section of the document (a headline or segment figure that disagrees with the Financial Review or the segment sub-section), or make parts fail to add up. Question asks for a section that must agree with another section.
+- padded: Short Answer only; repeat correct content to make it 1.3 to 1.8 times longer.
+
+PREFERRED ANSWER
+- Every claim is in the document or follows by arithmetic. Fill no gap and give no cause for a movement the document does not give. Mark judgments and recommendations as inference.
+- Recompute at full precision and round only at the end (percentages one decimal, multiples two). Keep the document's currency, unit and year labels. Keep actuals apart from estimates and projections, and consolidated apart from segment figures.
+- Cover every element named in the question, in the question's order and in the CIM's own section order, with figure and period. A draft is the finished page, never an outline, a partial draft or advice.
+- Where the section carries a point made elsewhere in the CIM (a headline, a consideration, a segment figure), state it so it agrees with that other section.
+- Each risk names itself, ties to a risk in the document's own risk exhibit or to a specific segment or figure of this company, states the effect, and gives the mitigant the document states or an open item. A mitigant is the Sellers' assertion: report it as theirs, not as proven. Any buyer-side judgement is marked as inference.
+- No preamble, restated question, disclaimer, placeholder, padding, invented names or citations.
+- CIM Drafting: one block per element, claim first then figures with unit and period, 80 to 150 words per element, 900 words at most, no closing summary.
+- Adjusted Metric: line 1 the final figure; one line per input (value, period, why that basis); labeled calculation steps and the derived measure; last line exactly "Answer: <figure> <unit>"; 60 to 250 words.
+- Short Answer: a full sentence or two, never a bare figure: count out of total, percentage and the defining test, 20 to 60 words.
+
+NOT-PREFERRED ANSWER
+- Copy the preferred answer and change only the affected text and what depends on it. Everything else stays word for word: wording, figures, qualifiers, structure and tone.
+- Keep it fluent and plausible, with no sign that an error was made.
+- Length: 0.5 to 0.8 times the preferred answer for omitted_element and no_workings; 1.3 to 1.8 times for padded; within 25 percent for every other defect.
+
+THINKING TRACES
+preferred_thinking and not_preferred_thinking: first-person reasoning inside <think>...</think>, plain paragraphs, no bullets, roughly 100 to 200 words each (up to 300 for Adjusted Metric), within 25 percent of each other. Each covers, in order: (1) the ask and the document rows or sections used, with label, value and period; (2) the working or how each element is built; (3) one plausible alternative reading a hasty analyst would take, worked through and ruled out by the document; (4) the conclusion in one sentence. The not-preferred trace reasons sincerely to its own answer, never names or hints at its defect, and its alternative-reading check is about an unrelated point. Neither trace repeats the answer text.
+
+NUMERIC CHECK
+For Adjusted Metric: expression (numbers and + - * / ( ) ** only, equal to the preferred final figure in its stated unit, so multiply by 100 for a percentage; every number in it copied from the document, never a rounded or re-derived input), final_value, unit, not_preferred_value (the not-preferred final figure, a different number). For other types use {{}}.
+
+EVIDENCE
+3 to 6 verbatim quotes from the document, each at most 25 words, copied character for character from the text above, as one unbroken span (never skip words in the middle, never correct spelling, never quote a sentence or heading that is not in the text above): a sentence, or one table row exactly as it appears (label then figures separated by spaces, for example a segment name followed by its yearly figures). Never use a pipe character, add punctuation, join separate lines, or write numbers differently from the document. No ellipses, rounding or paraphrase. They support the question and the preferred answer.
+
+OUTPUT
+Return only a valid JSON array. Each object has exactly these keys:
+{{
+  "question_type": "...",
+  "defect_type": "...",
+  "question": "...",
+  "preferred_thinking": "<think>...</think>",
+  "preferred": "...",
+  "not_preferred_thinking": "<think>...</think>",
+  "not_preferred": "...",
+  "numeric_check": {{}},
+  "evidence": ["..."]
+}}
+Use the exact assigned type and defect labels. Valid JSON with double quotes, \\n for newlines inside strings, escaped quotation marks, no Markdown fences, comments, trailing commas, nulls or extra keys.
+"""

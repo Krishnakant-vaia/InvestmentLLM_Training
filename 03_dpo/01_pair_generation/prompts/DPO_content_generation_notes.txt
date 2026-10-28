@@ -1,0 +1,34 @@
+DPO CONTENT GENERATION - NOTES FOR THE CODE (not part of the prompt)
+
+HOW IT RUNS
+One call = one case file + 1 to 3 assignments (assign.py). The prompt IN USE is DPO_content_generation_prompts_sng.txt (about 1,000 words). DPO_content_generation_prompts.txt (about 2,600 words, more detailed) is kept for comparison. Both are in the qa_prompt.txt format, so generate.load_prompt(path) loads either; pass the path instead of qa_prompt.txt for a content run. In these files every literal brace must be doubled ({{ }} and {{}}), because generate.py fills them with str.format.
+Placeholders: {chunk_text} (the case file), {question_types}, {defect_types}, {style}.
+Question types used: Drafting, Adjusted Metric, Short Answer. More types can be added to the run through the type mix; each must exist in score_pairs.COMPATIBLE and have a description in the prompt.
+
+WHAT THE CODE DOES FOR THE PROMPT
+- assign.py draws one layout line per call from config.STYLES (separate random stream, so types and defects are not affected) and puts it in the call as "style". generate.py passes it to the prompt as {style}. A prompt without {style} (qa_prompt.txt) ignores it.
+- assign.py assigns headline_number and wrong_adjustment only to a file whose text matches config.ADJUSTMENT_WORDS (add-back, adjust, normalis, underwritten, pro-forma, reported). A chunk dict without "text" is not restricted.
+- generate.py keeps the optional key "evidence" (a list of strings) next to the 8 required keys.
+- score_pairs.py code_flags: when a pair has "evidence", every quote must be found in the document (whitespace collapsed); otherwise the flag "evidence quote not found in the document" or "evidence missing" is raised. Pairs from the web-corpus prompt have no "evidence" and are not affected.
+- score_pairs.py COMPATIBLE: Drafting also allows headline_number, wrong_adjustment, calculation_slip and wrong_definition.
+
+SUGGESTED SHARES (starting values; adjust after the first run)
+Defects for section drafts: omitted_element 30, generic_content 20, unsupported_claim 15, overstated_certainty 10, headline_number 10, wrong_adjustment 5, calculation_slip 5, wrong_definition 5. For Adjusted Metric: headline_number 35, wrong_adjustment 30, calculation_slip 25, wrong_definition 10. For Short Answer: wrong_definition 50, off_by_one 30, unsupported_claim 20. config.DEFECT_TARGETS must cover exactly the defects of the chosen types, and no defect may exceed MAX_DEFECT_SHARE (15 percent).
+Elements per Drafting question: 3 to 6 (3: 20 percent, 4: 30, 5: 30, 6: 20). Drafting length: 80 to 150 words per element. Replace the 80 to 150 with the real answer length when known.
+
+CHECKS AFTER THE CALL (per pair)
+- Valid JSON array; question_type and defect_type equal the assignment; every text field non-empty.
+- Question: 2 to 5 sentences; no layout words; none of the answer's figures; names every element. Evidence quotes found in the document.
+- Length ratio of not-preferred to preferred inside the rule for the defect (score_pairs.py LENGTH_RULE). Hedge words per 1,000 words differ by 0.5 or less across the two answers. Headings, opening-sentence type and paragraph length match across the two answers.
+- Shared sentences (share of the not-preferred answer's sentences that appear in the preferred answer): at least 95 percent for omitted_element; 80 percent for unsupported_claim, overstated_certainty, headline_number, wrong_adjustment, calculation_slip, wrong_definition and off_by_one; 50 percent for generic_content; not checked for advice_not_draft.
+- At most 30 percent of the preferred answer's sentences share an 8-word run with the document.
+- Adjusted Metric: the last line matches "Answer: <figure> <unit>". The numeric_check expression evaluates to final_value within 1 percent, and rejected_value differs from it.
+- Neither answer nor trace mentions the defect or this prompt.
+- No opening phrase above 5 percent of all questions; similarity to every other question on the same file below 0.8.
+CHECKS OVER THE WHOLE DATASET
+No heading sequence above 10 percent of drafting answers; the preferred answer is longer in at most 60 percent of pairs; a style-only classifier separates the two answers with 65 percent accuracy or less; no defect above 15 percent of all pairs.
+
+NOT DONE (decided later)
+- The code does not pick the section or the document type; the model does. Revisit if the sections collapse onto one (for example Financial Analysis in every file).
+- numeric_check is verified only for Calculation/Numerical and Adjusted Metric.
+- The checks above that are not in score_pairs.py (shared sentences, hedge parity, opening and similarity caps, dataset-level checks) are specified here but not yet coded.

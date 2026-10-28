@@ -1,0 +1,7 @@
+.env
+data/
+outputs/
+__pycache__/
+.pytest_cache/
+!.env.example
+models/

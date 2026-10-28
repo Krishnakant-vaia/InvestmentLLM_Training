@@ -1,0 +1,13 @@
+run_state/
+run_state_output.log
+__pycache__/
+*.pyc
+.env
+refilter_state/
+merged_output/
+refilter_output.log
+merge_output.log
+run_state_final_upload.log
+scoring_state/
+scoring_pilot/
+scoring_*.log
